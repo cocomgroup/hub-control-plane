@@ -133,78 +133,66 @@ func main() {
 	log.Println("✅ Server exited gracefully")
 }
 
-	// setupRouter configures all HTTP routes and middleware
-	func setupRouter(
-		appHandler *handlers.AppHandler,
-		gqlServer *handler.Server,
-	) *gin.Engine {
-		router := gin.Default()
+// setupRouter configures all HTTP routes and middleware
+func setupRouter(
+    appHandler *handlers.AppHandler,
+    gqlServer *handler.Server,
+) *gin.Engine {
+    router := gin.Default()
 
-	// ==========================================
-	// HEALTH CHECK ENDPOINT
-	// ==========================================
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "healthy",
-			"timestamp": time.Now().UTC(),
-			"service":   "hub-control-plane",
-			"version":   "1.0.0",
-		})
-	})
+    // ==========================================
+    // HEALTH CHECK ENDPOINT
+    // ==========================================
+    router.GET("/health", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{
+            "status":    "healthy",
+            "timestamp": time.Now().UTC(),
+            "service":   "hub-control-plane",
+            "version":   "2.0.0",
+            "apis":      []string{"REST", "GraphQL"},
+        })
+    })
 
+    // ==========================================
+    // GRAPHQL ENDPOINTS
+    // ==========================================
+    
+    // GraphQL API endpoint
+    router.POST("/graphql", gin.WrapH(gqlServer))
+    router.GET("/graphql", gin.WrapH(gqlServer))
+    
+    // GraphQL Playground (development tool)
+    router.GET("/playground", gin.WrapH(playground.Handler("GraphQL Playground", "/graphql")))
 
-	// ==========================================
-	// HEALTH CHECK
-	// ==========================================
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "healthy",
-			"timestamp": time.Now().UTC(),
-			"service":   "go-aws-backend",
-			"version":   "2.0.0",
-			"apis":      []string{"REST", "GraphQL"},
-		})
-	})
-
-	// ==========================================
-	// GRAPHQL ENDPOINTS
-	// ==========================================
-	
-	// GraphQL API endpoint
-	router.POST("/graphql", gin.WrapH(gqlServer))
-	router.GET("/graphql", gin.WrapH(gqlServer))
-	
-	// GraphQL Playground (development tool)
-	router.GET("/playground", gin.WrapH(playground.Handler("GraphQL Playground", "/graphql")))
-
-	// ==========================================
-	// REST API ENDPOINTS (v1)
-	// ==========================================
-	v1 := router.Group("/api/v1")
-	{
-		// User routes
-		users := v1.Group("/users")
-		{
-			users.POST("", appHandler.CreateUser)
-			users.GET("/:id", appHandler.GetUser)
-			users.PUT("/:id", appHandler.UpdateUser)
-			users.DELETE("/:id", appHandler.DeleteUser)
+    // ==========================================
+    // REST API ENDPOINTS (v1)
+    // ==========================================
+    v1 := router.Group("/api/v1")
+    {
+        // User routes
+        users := v1.Group("/users")
+        {
+            users.POST("", appHandler.CreateUser)
 			users.GET("", appHandler.ListUsers)
-			
-			// User's contacts
-			users.POST("/:userId/contacts", appHandler.CreateContact)
-			users.GET("/:userId/contacts", appHandler.ListUserContacts)
-			users.GET("/:userId/contacts/favorites", appHandler.ListFavoriteContacts)
-			users.GET("/:userId/contacts/:contactId", appHandler.GetContact)
-			users.PUT("/:userId/contacts/:contactId", appHandler.UpdateContact)
-			users.DELETE("/:userId/contacts/:contactId", appHandler.DeleteContact)			
-		}
-		
-	}
+            users.GET("/:id", appHandler.GetUser)
+            users.PUT("/:id", appHandler.UpdateUser)
+            users.DELETE("/:id", appHandler.DeleteUser)
+        }
+        
+        // Contact routes - using :id for userId to keep RESTful
+        userContacts := v1.Group("/users/:id")
+        {
+			userContacts.POST("/contacts", appHandler.CreateContact)
+			userContacts.GET("/contacts", appHandler.ListUserContacts)
+			userContacts.GET("/contacts/favorites", appHandler.ListFavoriteContacts)
+			userContacts.GET("/contacts/:contactId", appHandler.GetContact)
+			userContacts.PUT("/contacts/:contactId", appHandler.UpdateContact)
+			userContacts.DELETE("/contacts/:contactId", appHandler.DeleteContact)
+        }
+    }
 
-	return router
+    return router
 }
-
 // ==========================================
 // DEPENDENCY INJECTION EXPLANATION
 // ==========================================

@@ -1,0 +1,136 @@
+# GraphQL Schema for Go AWS Backend
+
+# ============================================================================
+# SCALAR TYPES
+# ============================================================================
+
+scalar Time
+
+# ============================================================================
+# USER TYPES
+# ============================================================================
+
+type User {
+  id: ID!
+  email: String!
+  firstName: String!
+  lastName: String!
+  createdAt: Time!
+  updatedAt: Time!
+  
+  # Nested resolvers
+  contacts(limit: Int, favorites: Boolean): [Contact!]!
+}
+
+input CreateUserInput {
+  email: String!
+  firstName: String!
+  lastName: String!
+}
+
+input UpdateUserInput {
+  email: String
+  firstName: String
+  lastName: String
+}
+
+# ============================================================================
+# CONTACT TYPES
+# ============================================================================
+
+type Contact {
+  id: ID!
+  userId: ID!
+  name: String!
+  email: String
+  phone: String
+  company: String
+  isFavorite: Boolean!
+  tags: [String!]!
+  createdAt: Time!
+  updatedAt: Time!
+  
+  # Nested resolver
+  user: User!
+}
+
+input CreateContactInput {
+  userId: ID!
+  name: String!
+  email: String
+  phone: String
+  company: String
+  isFavorite: Boolean
+  tags: [String!]
+}
+
+input UpdateContactInput {
+  name: String
+  email: String
+  phone: String
+  company: String
+  isFavorite: Boolean
+  tags: [String!]
+}
+
+
+# ============================================================================
+# ANALYTICS TYPES
+# ============================================================================
+
+type UserDashboard {
+  user: User!
+  contacts: [Contact!]!
+  contactCount: Int!
+}
+
+type SystemStats {
+  totalUsers: Int!
+  totalContacts: Int!
+}
+
+# ============================================================================
+# QUERIES
+# ============================================================================
+
+type Query {
+  # User queries
+  user(id: ID!): User
+  users(limit: Int, offset: Int): [User!]!
+  
+  # Contact queries
+  contact(id: ID!, userId: ID!): Contact
+  contacts(limit: Int, offset: Int): [Contact!]!
+  userContacts(userId: ID!, favorites: Boolean): [Contact!]!
+  
+  # Analytics queries
+  userDashboard(userId: ID!): UserDashboard!
+  systemStats: SystemStats!
+}
+
+# ============================================================================
+# MUTATIONS
+# ============================================================================
+
+type Mutation {
+  # User mutations
+  createUser(input: CreateUserInput!): User!
+  updateUser(id: ID!, input: UpdateUserInput!): User!
+  deleteUser(id: ID!): Boolean!
+  
+  # Contact mutations
+  createContact(input: CreateContactInput!): Contact!
+  updateContact(id: ID!, userId: ID!, input: UpdateContactInput!): Contact!
+  deleteContact(id: ID!, userId: ID!): Boolean!
+  
+}
+
+# ============================================================================
+# SUBSCRIPTIONS (Optional - for real-time updates)
+# ============================================================================
+
+#type Subscription {
+  # Real-time updates
+#  userCreated: User!
+#  contactCreated(userId: ID!): Contact!
+#}

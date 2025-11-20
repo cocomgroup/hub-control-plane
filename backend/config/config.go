@@ -21,10 +21,9 @@ type Config struct {
 
 func LoadConfig() *Config {
 	return &Config{
-		Port:               getEnv("PORT", "8080"),
+		Port:               getEnv("PORT", "8081"),
 		AWSRegion:          getEnv("AWS_REGION", "us-east-1"),
-		DynamoDBTableName:  getEnv("DYNAMODB_TABLE_NAME", "users"),
-		ContactTableName:   getEnv("CONTACT_TABLE_NAME", "contacts"),
+		DynamoDBTableName:  getEnv("DYNAMODB_TABLE_NAME", "application-table"),
 		RedisAddress:       getEnv("REDIS_ADDRESS", "localhost:6379"),
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
 		CacheTTL:           300, // 5 minutes default

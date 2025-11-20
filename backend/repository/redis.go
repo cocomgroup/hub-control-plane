@@ -1,86 +1,143 @@
 package repository
 
 import (
-    "context"
-    "time"
-    "encoding/json"
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
 
     "github.com/redis/go-redis/v9"
     "hub-control-plane/backend/models"
 )
 
 type RedisCache struct {
-    client *redis.Client
-    ttl    time.Duration  // 5 minutes
+	client *redis.Client
+	ttl    time.Duration
 }
 
-// Config struct for Redis
-type RedisConfig struct {
-    Address  string
-    Password string
-    TTL      time.Duration
+func NewRedisCache(address, password string) *RedisCache {
+	client := redis.NewClient(&redis.Options{
+		Addr:     address,
+		Password: password,
+		DB:       0, // use default DB
+	})
+
+	return &RedisCache{
+		client: client,
+		ttl:    5 * time.Minute, // default TTL
+	}
 }
 
-// Constructor function 
-func NewRedisCache(cfg RedisConfig) *RedisCache {
-    client := redis.NewClient(&redis.Options{
-        Addr:     cfg.Address,
-        Password: cfg.Password,
-        DB:       0,
-    })
-    return &RedisCache{
-        client: client,
-        ttl:    cfg.TTL,
-    }
+// Ping checks if Redis is connected
+func (c *RedisCache) Ping(ctx context.Context) error {
+	return c.client.Ping(ctx).Err()
 }
 
-// Get user from cache (returns nil if not found)
+// GetUser retrieves a user from cache
 func (c *RedisCache) GetUser(ctx context.Context, id string) (*models.User, error) {
-    val, err := c.client.Get(ctx, c.userKey(id)).Result()
-    if err == redis.Nil {
-        return nil, nil  // Cache miss
-    }
-    if err != nil {
-        return nil, err
-    }
-    // Unmarshal JSON to User struct
-    var user models.User
-    if err := json.Unmarshal([]byte(val), &user); err != nil {
-        return nil, err
-    }
-    return &user, nil
+	key := c.userKey(id)
+	
+	val, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, nil // Cache miss
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get from cache: %w", err)
+	}
+
+	var user models.User
+	if err := json.Unmarshal([]byte(val), &user); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal user: %w", err)
+	}
+
+	return &user, nil
 }
 
-// Set user in cache with TTL
+// SetUser stores a user in cache
 func (c *RedisCache) SetUser(ctx context.Context, user *models.User) error {
-    // TODO: implement storing the user in redis cache with TTL
-    // Minimal stub to keep the code compiling.
-    return nil
+	key := c.userKey(user.ID)
+	
+	data, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user: %w", err)
+	}
+
+	if err := c.client.Set(ctx, key, data, c.ttl).Err(); err != nil {
+		return fmt.Errorf("failed to set cache: %w", err)
+	}
+
+	return nil
 }
 
-// Delete single user from cache
+// DeleteUser removes a user from cache
 func (c *RedisCache) DeleteUser(ctx context.Context, id string) error {
-    return c.client.Del(ctx, c.userKey(id)).Err()
+	key := c.userKey(id)
+	
+	if err := c.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("failed to delete from cache: %w", err)
+	}
+
+	return nil
 }
 
-// Invalidate the entire user list cache
+// InvalidateUserList invalidates the cached user list
 func (c *RedisCache) InvalidateUserList(ctx context.Context) error {
-    // TODO: implement cache invalidation logic
-    return nil
+	key := "users:list"
+	
+	if err := c.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("failed to invalidate list cache: %w", err)
+	}
+
+	return nil
 }
 
-// Cache user list
+// GetUserList retrieves the cached user list
 func (c *RedisCache) GetUserList(ctx context.Context) ([]*models.User, error) {
-    // TODO: implement retrieval of user list from cache
-    return nil, nil
+	key := "users:list"
+	
+	val, err := c.client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, nil // Cache miss
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get list from cache: %w", err)
+	}
+
+	var users []*models.User
+	if err := json.Unmarshal([]byte(val), &users); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal users: %w", err)
+	}
+
+	return users, nil
 }
 
+// SetUserList stores the user list in cache
 func (c *RedisCache) SetUserList(ctx context.Context, users []*models.User) error {
-    // TODO: implement storing user list in cache with TTL
-    return nil
+	key := "users:list"
+	
+	data, err := json.Marshal(users)
+	if err != nil {
+		return fmt.Errorf("failed to marshal users: %w", err)
+	}
+
+	if err := c.client.Set(ctx, key, data, c.ttl).Err(); err != nil {
+		return fmt.Errorf("failed to set list cache: %w", err)
+	}
+
+	return nil
 }
 
-// Generate cache keys: "user:{id}" or "users:list"
+// userKey generates the cache key for a user
 func (c *RedisCache) userKey(id string) string {
-    return "user:" + id
+	return fmt.Sprintf("user:%s", id)
+}
+
+// Close closes the Redis connection
+func (c *RedisCache) Close() error {
+	return c.client.Close()
+}
+
+// GetClient returns the underlying Redis client for sharing
+func (c *RedisCache) GetClient() *redis.Client {
+	return c.client
 }
