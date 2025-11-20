@@ -10,10 +10,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/playground"
 
 	// Local packages
 	"hub-control-plane/backend/config"
 	"hub-control-plane/backend/repository"
+	"hub-control-plane/backend/graphql"
+	"hub-control-plane/backend/graphql/resolvers"
 	"hub-control-plane/backend/service"
 	"hub-control-plane/backend/handlers"
 )
@@ -34,13 +38,8 @@ func main() {
 	// Initialize User DynamoDB Repository
 	// This creates a concrete implementation of UserRepository interface
 	// Pattern: NewXxxRepository(dependencies...) returns *XxxRepository
-	userRepo := repository.NewDynamoDBRepository(awsConfig, cfg.DynamoDBTableName)
-	log.Printf("✓ User DynamoDB repository initialized (table: %s)", cfg.DynamoDBTableName)
-	
-	// Initialize Contact DynamoDB Repository
-	// Separate repository for contacts with its own table
-	contactRepo := repository.NewDynamoDBRepository(awsConfig, cfg.ContactTableName)
-	log.Printf("✓ Contact DynamoDB repository initialized (table: %s)", cfg.ContactTableName)
+	repo := repository.NewGenericRepository(awsConfig, cfg.DynamoDBTableName)
+	log.Printf("✓ DynamoDB generic repository initialized (table: %s)", cfg.DynamoDBTableName)
 	
 	// ==========================================
 	// CACHE LAYER - Performance Optimization
@@ -48,19 +47,9 @@ func main() {
 	
 	// Initialize Redis Cache for Users
 	// This creates a Redis client and wraps it with user-specific cache methods
-	redisCfg := repository.RedisConfig{
-		Address:  cfg.RedisAddress,
-		Password: cfg.RedisPassword,
-	}
-	
-	userCache := repository.NewRedisCache(redisCfg)
+	cache := repository.NewRedisCache(cfg.RedisAddress, cfg.RedisPassword)
 	log.Printf("✓ User Redis cache initialized (address: %s)", cfg.RedisAddress)
-	
-	// Initialize Redis Cache for Contacts
-	// Reuses the same Redis connection but with contact-specific keys
-	// Pattern: Share the underlying client for efficiency
-	contactCache := repository.NewContactRedisCache(userCache.GetClient())
-	log.Printf("✓ Contact Redis cache initialized")
+	redisClient := cache.GetClient() 
 	
 	// ==========================================
 	// SERVICE LAYER - Business Logic
@@ -69,35 +58,36 @@ func main() {
 	// Initialize User Service
 	// Dependency Injection: Pass in both repository and cache
 	// The service coordinates between cache and database
-	userService := service.NewUserService(userRepo, userCache)
-	log.Printf("✓ User service initialized")
+	appService := service.NewAppServiceWithCache(repo, redisClient)
+	log.Printf("✓ App service initialized")
 	
-	// Initialize Contact Service
-	// Same pattern: inject repository and cache dependencies
-	contactService := service.NewContactService(contactRepo, contactCache)
-	log.Printf("✓ Contact service initialized")
-	
+	// Create app handler for REST API
+	appHandler := handlers.NewAppHandler(appService)
+	log.Printf("✓ App handler initialized")
+
 	// ==========================================
-	// HANDLER LAYER - HTTP Controllers
+	// GRAPHQL SETUP
 	// ==========================================
 	
-	// Initialize User Handler
-	// Dependency Injection: Pass in the service
-	// Handler focuses only on HTTP concerns (request/response)
-	userHandler := handlers.NewUserHandler(userService)
-	log.Printf("✓ User handler initialized")
+	// Create GraphQL resolver
+	gqlResolver := resolvers.NewResolver(appService)
+	log.Printf("✓ GraphQL resolver initialized")
 	
-	// Initialize Contact Handler
-	contactHandler := handlers.NewContactHandler(contactService)
-	log.Printf("✓ Contact handler initialized")
+	// Create GraphQL server
+	gqlServer := handler.NewDefaultServer(
+		graphql.NewExecutableSchema(
+			graphql.Config{Resolvers: gqlResolver},
+		),
+	)
+	log.Printf("✓ GraphQL server initialized")
 
 	// ==========================================
 	// HTTP SERVER SETUP
 	// ==========================================
 	
 	// Setup router with all handlers
-	router := setupRouter(userHandler, contactHandler)
-	log.Printf("✓ Router configured with all endpoints")
+	router := setupRouter(appHandler, gqlServer)
+	log.Printf("✓ Router configured")
 
 	// Create HTTP server with configured handler
 	srv := &http.Server{
@@ -143,10 +133,12 @@ func main() {
 	log.Println("✅ Server exited gracefully")
 }
 
-// setupRouter configures all HTTP routes and middleware
-func setupRouter(userHandler *handlers.UserHandler, contactHandler *handlers.ContactHandler) *gin.Engine {
-	// Create router with default middleware (logger and recovery)
-	router := gin.Default()
+	// setupRouter configures all HTTP routes and middleware
+	func setupRouter(
+		appHandler *handlers.AppHandler,
+		gqlServer *handler.Server,
+	) *gin.Engine {
+		router := gin.Default()
 
 	// ==========================================
 	// HEALTH CHECK ENDPOINT
@@ -155,45 +147,59 @@ func setupRouter(userHandler *handlers.UserHandler, contactHandler *handlers.Con
 		c.JSON(http.StatusOK, gin.H{
 			"status":    "healthy",
 			"timestamp": time.Now().UTC(),
-			"service":   "go-aws-backend",
+			"service":   "hub-control-plane",
 			"version":   "1.0.0",
 		})
 	})
 
+
 	// ==========================================
-	// API v1 ROUTES
+	// HEALTH CHECK
+	// ==========================================
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "healthy",
+			"timestamp": time.Now().UTC(),
+			"service":   "go-aws-backend",
+			"version":   "2.0.0",
+			"apis":      []string{"REST", "GraphQL"},
+		})
+	})
+
+	// ==========================================
+	// GRAPHQL ENDPOINTS
+	// ==========================================
+	
+	// GraphQL API endpoint
+	router.POST("/graphql", gin.WrapH(gqlServer))
+	router.GET("/graphql", gin.WrapH(gqlServer))
+	
+	// GraphQL Playground (development tool)
+	router.GET("/playground", gin.WrapH(playground.Handler("GraphQL Playground", "/graphql")))
+
+	// ==========================================
+	// REST API ENDPOINTS (v1)
 	// ==========================================
 	v1 := router.Group("/api/v1")
 	{
-		// ==========================================
-		// USER ROUTES
-		// ==========================================
+		// User routes
 		users := v1.Group("/users")
 		{
-			// Basic CRUD operations
-			users.POST("", userHandler.CreateUser)           // Create new user
-			users.GET("/:id", userHandler.GetUser)           // Get user by ID
-			users.PUT("/:id", userHandler.UpdateUser)        // Update user
-			users.DELETE("/:id", userHandler.DeleteUser)     // Delete user
-			users.GET("", userHandler.ListUsers)             // List all users
+			users.POST("", appHandler.CreateUser)
+			users.GET("/:id", appHandler.GetUser)
+			users.PUT("/:id", appHandler.UpdateUser)
+			users.DELETE("/:id", appHandler.DeleteUser)
+			users.GET("", appHandler.ListUsers)
 			
-			// User's contacts (nested routes)
-			users.GET("/:userId/contacts", contactHandler.ListContactsByUser)           // Get all contacts for a user
-			users.GET("/:userId/contacts/favorites", contactHandler.ListFavoriteContacts) // Get favorite contacts
+			// User's contacts
+			users.POST("/:userId/contacts", appHandler.CreateContact)
+			users.GET("/:userId/contacts", appHandler.ListUserContacts)
+			users.GET("/:userId/contacts/favorites", appHandler.ListFavoriteContacts)
+			users.GET("/:userId/contacts/:contactId", appHandler.GetContact)
+			users.PUT("/:userId/contacts/:contactId", appHandler.UpdateContact)
+			users.DELETE("/:userId/contacts/:contactId", appHandler.DeleteContact)			
 		}
 		
-		// ==========================================
-		// CONTACT ROUTES
-		// ==========================================
-		contacts := v1.Group("/contacts")
-		{
-			// Basic CRUD operations
-			contacts.POST("", contactHandler.CreateContact)      // Create new contact
-			contacts.GET("/:id", contactHandler.GetContact)      // Get contact by ID
-			contacts.PUT("/:id", contactHandler.UpdateContact)   // Update contact
-			contacts.DELETE("/:id", contactHandler.DeleteContact) // Delete contact
-			contacts.GET("", contactHandler.ListContacts)        // List all contacts
-		}
 	}
 
 	return router
