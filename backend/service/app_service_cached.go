@@ -504,7 +504,7 @@ func (s *AppServiceWithCache) GetUserDashboard(ctx context.Context, userID strin
 
 	dashboard := &UserDashboard{
 		Contacts: make([]*models.ContactEntity, 0),
-		Orders:   make([]*models.OrderEntity, 0),
+		//Orders:   make([]*models.OrderEntity, 0),
 	}
 
 	// Separate items by entity type
@@ -518,9 +518,9 @@ func (s *AppServiceWithCache) GetUserDashboard(ctx context.Context, userID strin
 		case "CONTACT":
 			contact := &models.ContactEntity{}
 			dashboard.Contacts = append(dashboard.Contacts, contact)
-		case "ORDER":
-			order := &models.OrderEntity{}
-			dashboard.Orders = append(dashboard.Orders, order)
+		//case "ORDER":
+		//	order := &models.OrderEntity{}
+		//	dashboard.Orders = append(dashboard.Orders, order)
 		}
 	}
 
@@ -542,5 +542,5 @@ func (s *AppServiceWithCache) GetUserDashboard(ctx context.Context, userID strin
 type UserDashboard struct {
 	User     *models.UserEntity        `json:"user"`
 	Contacts []*models.ContactEntity   `json:"contacts"`
-	Orders   []*models.OrderEntity     `json:"orders"`
+	//Orders   []*models.OrderEntity     `json:"orders"`
 }
